@@ -18,6 +18,7 @@ import re
 
 
 MAX_HOST_NUMBER = 256**2
+GOODPUT_INTERVAL = 200
 
 
 class DumbbellTopo(Topo):
@@ -34,7 +35,7 @@ class DumbbellTopo(Topo):
         for h in range(n):
             host = self.addHost('h%s' % h, cpu=.5 / n)
             self.addLink(host, switch1)
-            receiver = self.addHost('r%s' % h, cpu=.5 / n)
+            receiver = self.addHost('r%s' % h, cpu=1 / n)
             self.addLink(receiver, switch3)
 
 
@@ -114,7 +115,7 @@ def parseConfigFile(file):
     return output
 
 
-def run_test(commands, directory, name, bandwidth, initial_rtt, buffer_size, buffer_latency, poll_interval):
+def run_test(commands, directory, name, bandwidth, initial_rtt, buffer_size, buffer_limit, poll_interval):
     duration = 0
     start_time = 0
     number_of_hosts = 0
@@ -131,7 +132,7 @@ def run_test(commands, directory, name, bandwidth, initial_rtt, buffer_size, buf
         'Git Commit: {}'.format(get_git_revision_hash()),
         'Initial Bandwidth: {}'.format(bandwidth),
         'Burst Buffer: {}'.format(buffer_size),
-        'Buffer Latency: {}'.format(buffer_latency),
+        'Buffer Latency: {}'.format(buffer_limit),
         'Commands: '
     ]
     for cmd in commands:
@@ -176,6 +177,13 @@ def run_test(commands, directory, name, bandwidth, initial_rtt, buffer_size, buf
         print_error('Error on starting tcpdump\n{}'.format(e))
         sys.exit(1)
 
+    # start tcpprobe
+    os.system('modprobe -r tcp_probe')
+    os.system('modprobe tcp_probe full=1 port=5000')
+    os.system('chmod 444 /proc/net/tcpprobe')
+    os.system('timeout {} cat /proc/net/tcpprobe > {} &'.format(duration, os.path.join(output_directory, 'tcpprobe.xls')))
+
+
     time.sleep(1)
 
     host_counter = 0
@@ -189,19 +197,27 @@ def run_test(commands, directory, name, bandwidth, initial_rtt, buffer_size, buf
         host_counter += 1
 
         # setup FQ, algorithm, netem, nc host
-        send.cmd('tc qdisc add dev {}-eth0 root fq pacing'.format(send))
+        if cmd['algorithm'] == 'bbr' or cmd['algorithm'] == 'nv' or cmd['algorithm'] == 'mybbr':
+            send.cmd('tc qdisc add dev {}-eth0 root fq pacing'.format(send))
+        else:
+            send.cmd('tc qdisc add dev {}-eth0 root pfifo_fast')
         send.cmd('ip route change 10.0.0.0/8 dev {}-eth0 congctl {}'.format(send, cmd['algorithm']))
         send.cmd('ethtool -K {}-eth0 tso off'.format(send))
         recv.cmd('tc qdisc add dev {}-eth0 root netem delay {}'.format(recv, cmd['rtt']))
-        recv.cmd('timeout {} nc -klp 9000 > /dev/null &'.format(duration))
+        recv.cmd('tcpdump -i {}-eth0 -n tcp -s 88 > {} &'.format(recv, os.path.join(output_directory,'{}.txt'.format(recv))))
+        #recv.cmd('timeout {} nc -klp 9000 > /dev/null &'.format(duration))
+        #recv.cmd('iperf -s -p 5000 &')
+        #recv.cmd('./goodput.sh .5 {} &'.format(output_directory,'goodput_{}.txt'.format(recv.IP())));
+        #recv.cmd('./goodput.sh 100 {} &'.format(os.path.join(output_directory,'goodput_{}.txt'.format(recv.IP()))))
+        recv.cmd('./server 5000 {} {} &'.format(os.path.join(output_directory,'{}.goodput'.format(recv)),GOODPUT_INTERVAL))
 
+        #time.sleep(1)
+        #recv.cmd('sudo python TCPserver.py > ./goodputResult.txt &')
         # pull BBR values
         send.cmd('./ss_script.sh {} >> {}.bbr &'.format(poll_interval, os.path.join(output_directory, send.IP())))
 
     s2, s3 = net.get('s2', 's3')
-    s2.cmd('tc qdisc add dev s2-eth2 root tbf rate {} buffer {} latency {}'.format(
-        bandwidth, buffer_size, buffer_latency))
-
+    s2.cmd('tc qdisc add dev s2-eth2 root tbf rate {} buffer {} limit {}'.format(bandwidth, buffer_size, buffer_limit))
     netem_running = False
     if initial_rtt != '0ms':
         netem_running = True
@@ -222,8 +238,8 @@ def run_test(commands, directory, name, bandwidth, initial_rtt, buffer_size, buf
             if cmd['command'] == 'link':
                 s2 = net.get('s2')
                 if cmd['change'] == 'bw':
-                    s2.cmd('tc qdisc change dev s2-eth2 root tbf rate {} buffer {} latency {}'.format(
-                        cmd['value'], buffer_size, buffer_latency))
+                    s2.cmd('tc qdisc change dev s2-eth2 root tbf rate {} buffer {} limit {}'.format(cmd['value'], buffer_size, buffer_limit))
+                    print("Bottleneck : " + str(cmd['value']))
                     log_String = '  Change bandwidth to {}.'.format(cmd['value'])
                 elif cmd['change'] == 'rtt':
                     if netem_running:
@@ -238,7 +254,8 @@ def run_test(commands, directory, name, bandwidth, initial_rtt, buffer_size, buf
                 recv = net.get('r{}'.format(host_counter))
                 timeout = cmd['stop']
                 log_String = '  h{}: {} {}, {} -> {}'.format(host_counter, cmd['algorithm'], cmd['rtt'], send.IP(), recv.IP())
-                send.cmd('timeout {} nc {} 9000 < /dev/urandom > /dev/null &'.format(timeout, recv.IP()))
+                #send.cmd('timeout {} nc {} 9000 < /dev/urandom > /dev/null &'.format(timeout, recv.IP()))
+                send.cmd('iperf -c {} -p 5000 -t {} -i 0.5 &'.format(recv.IP(),cmd['stop'], os.path.join(output_directory,'sender_iperf.txt'.format(send.IP()))))
                 host_counter += 1
             print(log_String + ' ' * (text_width - len(log_String)))
 
@@ -250,6 +267,7 @@ def run_test(commands, directory, name, bandwidth, initial_rtt, buffer_size, buf
         else:
             print_error(e)
     finally:
+        time.sleep(3)
         net.stop()
         cleanup()
 
@@ -262,7 +280,7 @@ def verify_arguments(args, commands):
     verified &= verify('rate', args.bandwidth)
     verified &= verify('time', args.rtt)
     verified &= verify('size', args.buffer_size)
-    verified &= verify('time', args.latency)
+    verified &= verify('size', args.limit)
 
     for c in commands:
         if c['command'] == 'link':
@@ -308,9 +326,9 @@ if __name__ == '__main__':
     parser.add_argument('-d', dest='directory',
                         default='test/', help='Path to the output directory. (default: test/)')
     parser.add_argument('-s', dest='buffer_size',
-                        default='1600b', help='Burst size of the token bucket filter. (default: 1600b)')
-    parser.add_argument('-l', dest='latency',
-                        default='100ms', help='Maximum latency at the bottleneck buffer. (default: 100ms)')
+                        default='1600b', help='Maximum size of bottleneck buffer. (default : 62500b)')
+    parser.add_argument('-l', dest='limit',
+                        default='62500b', help='Maximum latency at the bottleneck buffer. (default: 100ms)')
     parser.add_argument('-n', dest='name',
                         default='TCP', help='Name of the output directory. (default: TCP)')
     parser.add_argument('--poll-interval', dest='poll_interval', type=float,
@@ -331,12 +349,14 @@ if __name__ == '__main__':
         print_error('Please fix malformed parameters.')
         sys.exit(128)
 
+    print(args.bandwidth)
+
     # setLogLevel('info')
     run_test(bandwidth=args.bandwidth,
              initial_rtt=args.rtt,
              commands=commands,
              buffer_size=args.buffer_size,
-             buffer_latency=args.latency,
+             buffer_limit=args.limit,
              name=args.name,
              directory=args.directory,
              poll_interval=args.poll_interval)

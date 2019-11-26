@@ -90,7 +90,7 @@ def main():
                                    delta_t=float(args.delta_t))
 
             if 'csv' in args.output:
-                print('Writing to csv ...')
+                print('<Step1> Writing to csv ...')
                 write_to_csv(directory, pcap_data)
         else:
             print('{}/{} Reading csv {}'.format(i + 1, len(paths), directory))
@@ -99,7 +99,7 @@ def main():
                 continue
 
         if 'pdf' in args.output:
-            print('Creating plots ...')
+            print('<Step2> Creating plots ...')
             plot_all(directory, pcap_data, plot_only=plots, hide_total=args.hide_total, skip_retransmission=args.skip_retransmission)
 
 
@@ -388,6 +388,48 @@ def parse_pcap(path, pcap_file1, pcap_file2, delta_t):
 
     fairness_troughput = compute_fairness(throughput, delta_t)
     fairness_sending_rate = compute_fairness(sending_rate, delta_t)
+
+    # ***********************************************************************************
+    # Print a Avg. throu-
+    print("\n===================Throughput==================")
+    temp_each_t = []
+    sum_each_throu = []
+    avg_each_throu = []
+    avg_each_throu_mbps = []
+    for i in range(len(throughput)):
+        temp_each_t.append(throughput[i][1])
+        sum_each_throu.append(sum(temp_each_t[i], 0.0))
+        avg_each_throu.append(sum_each_throu[i]/len(temp_each_t[0]))
+        avg_each_throu_mbps.append(avg_each_throu[i] * 0.000001)
+
+        print("Average Throughput of Flow {}: {} Mbps".format(i+1, avg_each_throu_mbps[i]))
+
+    #print("TEST 1: {}".format(len(throughput)))
+
+    # Print a Avg. total throu- edited by GH
+    temp_t_t = []
+    for i in range(len(total_throughput[1])):
+        temp_t_t.append(total_throughput[1][i])
+    #print(temp_t_t)
+
+    sum_total_throu = sum(temp_t_t, 0.0)
+    avg_total_throu = sum_total_throu / len(total_throughput[1])
+    avg_total_throu_mbps = avg_total_throu * 0.000001
+    print("Average Total Throughput: {} Mbps".format(avg_total_throu_mbps))
+
+    # Print a Avg. throu- edited by GH
+    temp_f = []
+    for i in range(len(fairness_troughput[1])):
+        temp_f.append(fairness_troughput[1][i])
+    #print(temp_f)
+
+    sum_f_throu = sum(temp_f, 0.0)
+    avg_f_throu = sum_f_throu / len(temp_f)
+    print("Average Throughput Fairness: {}".format(avg_f_throu))
+    print("===============================================\n")
+    # ***********************************************************************************
+
+
     fairness = {
         'Throughtput': fairness_troughput,
         'Sending Rate': fairness_sending_rate
@@ -396,6 +438,8 @@ def parse_pcap(path, pcap_file1, pcap_file2, delta_t):
     bbr_values, cwnd_values = parse_bbr_and_cwnd_values(path)
     bbr_total_values, sync_phases, sync_duration = compute_total_values(bbr_values)
     buffer_backlog = parse_buffer_backlog(path)
+    goodput = parse_goodput(path)
+
 
     data_info = DataInfo(sync_duration=sync_duration,
                          sync_phases=sync_phases)
@@ -403,6 +447,7 @@ def parse_pcap(path, pcap_file1, pcap_file2, delta_t):
     throughput[len(throughput)] = total_throughput
     sending_rate[len(sending_rate)] = total_sending_rate
     retransmissions_interval[len(retransmissions_interval)] = total_retransmisions
+
 
     return PcapData(rtt=round_trips,
                     inflight=inflight,
@@ -416,6 +461,7 @@ def parse_pcap(path, pcap_file1, pcap_file2, delta_t):
                     retransmissions=retransmissions,
                     retransmissions_interval=retransmissions_interval,
                     buffer_backlog=buffer_backlog,
+                    goodput=goodput,
                     data_info=data_info)
 
 
@@ -441,6 +487,42 @@ def parse_buffer_backlog(path):
         f.close()
     return output
 
+def parse_goodput(path):
+    output = {}
+    paths = [os.path.join(path, f) for f in os.listdir(path) if f.endswith('.goodput')]
+    total = ([], [])
+    print("\n====================Goodput====================")
+
+    allGoodput=0
+
+    for i, p in enumerate(paths):
+        output[i] = ([], [])
+        output[i+1] = ([],[])
+        f = open(p)
+        for line in f:
+            split = line.split(';')
+            if split[0] == 'Total':
+                print ("r" + str(i) + " : "+ str(split[1]) + " bps");
+                allGoodput = allGoodput + float(split[1])
+                break;
+            #timestamp = parse_timestamp(split[0])
+            #size = split[1].replace('b\n', '')
+            timestamp = float(split[0])
+            size = split[1]
+            #if 'K' in size:
+            #    size = float(size.replace('K', '')) * 1000
+            #elif 'M' in size:
+            #    size = float(size.replace('M', '')) * 1000000
+            #elif 'G' in size:
+            #    size = float(size.replace('G', '')) * 1000000000
+            output[i][0].append(timestamp)
+            output[i][1].append(float(size))
+            output[i+1][0].append(timestamp)
+            output[i+1][1].append(float(size))
+        f.close()
+    print("Total : " + str(allGoodput) + " bps")
+    print("===============================================\n")
+    return output
 
 def parse_bbr_and_cwnd_values(path):
     files = []

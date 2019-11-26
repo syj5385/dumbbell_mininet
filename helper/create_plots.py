@@ -16,6 +16,7 @@ PLOT_TOTAL = True
 PLOT_TYPES = [
     'sending_rate',
     'throughput',
+    'goodput', 
     'fairness',
     'retransmission',
     'avg_rtt',
@@ -55,6 +56,7 @@ def plot_all(path, pcap_data, plot_only, hide_total=False, skip_retransmission=F
                 raise
 
     throughput = pcap_data.throughput
+    goodput = pcap_data.goodput
     fairness = pcap_data.fairness
     rtt = pcap_data.rtt
     inflight = pcap_data.inflight
@@ -66,7 +68,6 @@ def plot_all(path, pcap_data, plot_only, hide_total=False, skip_retransmission=F
     retransmissions = pcap_data.retransmissions
     retransmissions_interval = pcap_data.retransmissions_interval
     buffer_backlog = pcap_data.buffer_backlog
-
     t_max = 0
     for t in throughput:
         t_max = max(t_max, throughput[t][0][-1])
@@ -81,6 +82,11 @@ def plot_all(path, pcap_data, plot_only, hide_total=False, skip_retransmission=F
     if 'throughput' in plot_only:
         plots += [
             Plot((throughput, retransmissions), plot_throughput, 'plot_throughput.pdf', 'Throughput', 'bit/s')
+        ]
+
+    if 'goodput' in plot_only:
+        plots += [
+            Plot((goodput, retransmissions), plot_goodput, 'plot_goodput.pdf', 'Goodput', 'bit/s')
         ]
 
     if 'fairness' in plot_only and len(sending_rate.keys()) > 2:
@@ -177,7 +183,7 @@ def plot_all(path, pcap_data, plot_only, hide_total=False, skip_retransmission=F
     pdf_height = 55.0 * float(len(plots)) / len(PLOT_TYPES)
     f.set_size_inches(20, pdf_height)
 
-    print("  *  create plot_complete.pdf")
+    print("  -> Plotting File Name : create plot_complete.pdf")
     for i, plot in enumerate(plots):
         axarr[i].set_xticks(np.arange(0, grid_tick_max_value, grid_tick_maior_interval))
         axarr[i].set_xticks(np.arange(0, grid_tick_max_value, grid_tick_minor_interval), minor=True)
@@ -193,8 +199,9 @@ def plot_all(path, pcap_data, plot_only, hide_total=False, skip_retransmission=F
         axarr[i].set_title('{}. {}'.format(i, plot.plot_name))
         plot.plot_function(plot.data, axarr[i])
         axarr[i].set_xlim(xmax=t_max)
-        print("     -  {} created".format(plot.plot_name))
-
+        
+    
+    print ("plotting finished")
     f.tight_layout()
     plt.savefig(os.path.join(path, 'plot_complete.pdf'))
     plt.close()
@@ -221,6 +228,26 @@ def plot_throughput(data, p_plt):
         data = retransmissions[c]
         p_plt.plot(data, np.zeros_like(data), '.', color='red')
 
+def plot_goodput(data, p_plt):
+    goodput = data[0]
+    retransmissions = data[1]
+    total = len(goodput) - 1
+
+    if total > 1 and PLOT_TOTAL:
+        data = goodput[total]
+        data = filter_smooth(data, 5, 2)
+        p_plt.plot(data[0], data[1], label='Total Goodput', color='#444444')
+
+    for c in goodput:
+        data = goodput[c]
+        data = filter_smooth(data, 5, 2)
+
+        if int(c) != total:
+            p_plt.plot(data[0], data[1], label='Connection {}'.format(c))
+
+    for c in retransmissions:
+        data = retransmissions[c]
+        p_plt.plot(data, np.zeros_like(data), '.', color='red')
 
 def plot_sending_rate(data, p_plt):
     sending_rate = data[0]

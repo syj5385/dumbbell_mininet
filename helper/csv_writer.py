@@ -16,7 +16,8 @@ CSV_FILE_NAMES = {
     'cwnd_values': 'cwnd_values.csv',
     'retransmissions': 'retransmissions.csv',
     'retransmissions_interval': 'retransmissions_interval.csv',
-    'buffer_backlog': 'buffer_backlog.csv'
+    'buffer_backlog': 'buffer_backlog.csv',
+    'goodput': 'goodput.csv'
 }
 
 CSV_PATH = 'csv_data'
@@ -82,7 +83,8 @@ def read_from_csv(path):
         'cwnd_values_file': os.path.join(path, CSV_FILE_NAMES['cwnd_values']),
         'retransmissions_file': os.path.join(path, CSV_FILE_NAMES['retransmissions']),
         'retransmissions_interval_file': os.path.join(path, CSV_FILE_NAMES['retransmissions_interval']),
-        'buffer_backlog_file': os.path.join(path, CSV_FILE_NAMES['buffer_backlog'])
+        'buffer_backlog_file': os.path.join(path, CSV_FILE_NAMES['buffer_backlog']),
+        'goodput_file': os.path.join(path, CSV_FILE_NAMES['goodput'])
     }
 
     missing_file = False
@@ -106,6 +108,7 @@ def read_from_csv(path):
     retransmissions = read_csv(data_files['retransmissions_file'], 1)
     retransmissions_interval = read_csv(data_files['retransmissions_interval_file'], 3)
     buffer_backlog = read_csv(data_files['buffer_backlog_file'])
+    goodput = read_csv(data_file['goodput'])
 
     return PcapData(throughput=throughput,
                     rtt=rtt,
@@ -118,7 +121,8 @@ def read_from_csv(path):
                     cwnd_values=cwnd_values,
                     retransmissions=retransmissions,
                     retransmissions_interval=retransmissions_interval,
-                    buffer_backlog=buffer_backlog)
+                    buffer_backlog=buffer_backlog,
+                    goodput=goodput)
 
 
 def read_csv(path, columns_per_connection=2):
@@ -153,7 +157,8 @@ def write_info_file(path, pcap_data):
         ('Avg Rtt', pcap_data.avg_rtt, 1, False),
         ('Inflight', pcap_data.inflight, 1, False),
         ('BDP', pcap_data.bbr_values, 5, False),
-        ('Buffer Backlog', pcap_data.buffer_backlog, 1, False)
+        ('Buffer Backlog', pcap_data.buffer_backlog, 1, False),
+        ('goodput', pcap_data.goodput, 1,False)
     ]
 
     path = os.path.join(path, INFORMATION_FILE)
